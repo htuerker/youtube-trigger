@@ -1,0 +1,225 @@
+{
+  "integrations": ["youtube", ""],
+  "meta": {
+    "description": "",
+    "name": "Youtube Trigger",
+    "id": "x-youtube-trigger",
+    "icon": { "url": "https://storage.googleapis.com/buildship-app-us-central1/icons/youtube.svg", "type": "URL" }
+  },
+  "request": { "title": "body", "properties": {}, "type": "object", "description": "", "buildship": { "index": 0 } },
+  "script": "// Imports the Scheduler library\nimport { CloudSchedulerClient } from \"@google-cloud/scheduler\";\nimport { OAuth2Client } from \"google-auth-library\";\n\n/*\n** Youtube Trigger imports\n*/\nimport { Storage, Bucket } from '@google-cloud/storage';\nimport { google, youtube_v3 } from \"googleapis\";\nimport process from 'node:process';\nimport { URL } from 'node:url';\n/*\n** Youtube Trigger imports\n*/\n\nconst schedulerClient = new CloudSchedulerClient();\n\nconst getTarget = (runtimeUrl, workflowId) => ({\n  uri: `${runtimeUrl}/executeWorkflow/${workflowId}`,\n  httpMethod: \"POST\",\n  headers: {\n    \"Content-Type\": \"application/json\",\n  },\n  oidcToken: {\n    serviceAccountEmail: `runtime@${process.env.GCLOUD_PROJECT}.iam.gserviceaccount.com`,\n    audience: process.env.GCLOUD_PROJECT + \"/\" + workflowId,\n  },\n});\n\nconst locationIds = [\n  \"asia-east1\",\n  \"asia-northeast1\",\n  \"asia-southeast1\",\n  \"europe-north1\",\n  \"europe-west1\",\n  \"us-central1\",\n  \"us-east1\",\n  \"us-east4\",\n  \"us-west1\"\n];\n\nconst createTrigger = async (\n  { schedule, timeZone },\n  { workflow, runtimeUrl }\n) => {\n  /**\n *  Required. The location name. For example:\n *  `projects/PROJECT_ID/locations/LOCATION_ID`.\n */\n  let locationId = process.env.SERVICE_REGION;\n  locationId = locationIds.includes(locationId) ? locationId : \"us-central1\";\n  const parent = `projects/${process.env.GCLOUD_PROJECT}/locations/${locationId}`;\n  const name = `${parent}/jobs/rowy-workflow-${workflow.id}`;\n  /**\n    *  Required. The job to add. The user can optionally specify a name for the\n    *  job in name google.cloud.scheduler.v1.Job.name. name google.cloud.scheduler.v1.Job.name cannot be the same as an\n    *  existing job. If a name is not specified then the system will\n    *  generate a random unique name that will be returned\n    *  (name google.cloud.scheduler.v1.Job.name) in the response.\n    */\n  const httpTarget = getTarget(runtimeUrl, workflow.id);\n\n  try {\n    // Run request\n    const response = await schedulerClient.createJob({\n      parent,\n      job: {\n        name,\n        schedule,\n        timeZone,\n        httpTarget,\n      },\n    });\n\n    return response;\n  } catch (error) {\n    if (error.code === 6) {\n      // 'ALREADY_EXISTS' error\n      console.log(`Job ${name} already exists.`);\n      return updateTrigger(\n        { schedule, timeZone },\n        { workflow, runtimeUrl }\n      );\n    } else {\n      throw error;\n    }\n  }\n};\n\nconst updateTrigger = async (\n  { schedule, timeZone },\n  { workflow, runtimeUrl }\n) => {\n  let locationId = process.env.SERVICE_REGION;\n  locationId = locationIds.includes(locationId) ? locationId : \"us-central1\";\n  const parent = `projects/${process.env.GCLOUD_PROJECT}/locations/${locationId}`;\n  const name = `${parent}/jobs/rowy-workflow-${workflow.id}`;\n  const httpTarget = getTarget(runtimeUrl, workflow.id);\n\n  try {\n    // Update Job\n    const response = await schedulerClient.updateJob({\n      job: {\n        httpTarget,\n        name,\n        schedule,\n        timeZone,\n      },\n    });\n\n    return response;\n  } catch {\n    // Create Job if not exists\n    const response = await schedulerClient.createJob({\n      parent,\n      job: {\n        name,\n        schedule,\n        timeZone,\n        httpTarget,\n      },\n    });\n\n    return response;\n  }\n};\n\nconst deleteTrigger = async (_, { workflow }) => {\n  let locationId = process.env.SERVICE_REGION;\n  locationId = locationIds.includes(locationId) ? locationId : \"us-central1\";\n  const parent = `projects/${process.env.GCLOUD_PROJECT}/locations/${locationId}`;\n  const name = `${parent}/jobs/rowy-workflow-${workflow.id}`;\n  const request = {\n    name,\n  };\n  const response = await schedulerClient.deleteJob(request);\n  return response;\n};\n\nconst execute = async (params, context) => {\n  const { request, workflow, logging, isTest } = context;\n  if (isTest) {\n    /*\n    ** execute Youtube Trigger\n    */\n    const triggerOutput = await executeYoutubeTrigger(params, context);\n    /*\n    ** execute Youtube Trigger\n    */\n    return {\n      /*\n      ** Youtube Trigger result\n      */\n      output: triggerOutput,\n      /*\n      ** Youtube Trigger result\n      */\n    }\n  }\n  const client = new OAuth2Client(process.env.GCLOUD_PROJECT);\n  const token = request.headers.authorization?.split(\" \")[1];\n\n  if (!token) {\n    throw new Error(\n      \"Missing authorization header or invalid format, needs to be in format: Bearer <IdToken>\"\n    );\n  }\n\n  try {\n    const audience = process.env.GCLOUD_PROJECT + \"/\" + workflow.id;\n    const ticket = await client.verifyIdToken({\n      idToken: token,\n      audience: audience,\n    });\n\n    const payload = ticket.getPayload();\n\n    if (!payload.email_verified) {\n      throw new Error(\"Email not verified.\");\n    }\n  } catch (error) {\n    throw new Error(\"Token verification failed.\");\n  }\n\n  /*\n  ** execute Youtube Trigger\n  */\n  const triggerOutput = await executeYoutubeTrigger(params, context);\n  /*\n  ** execute Youtube Trigger\n  */\n\n  const ret = {\n    query: request.query,\n    headers: request.headers,\n    body: {},\n  };\n\n  logging.log(ret);\n\n  return {\n    request: ret,\n    /*\n    ** Youtube Trigger result\n    */\n    output: triggerOutput,\n    /*\n    ** Youtube Trigger result\n    */\n  };\n};\n\n/*\n** Youtube Trigger\n*/\n\nconst youtubeClient = google.youtube('v3');\n\ntype Snapshot = {\n  channelId: string;\n  latestVideoPublishedAt: string;\n  videos: youtube_v3.Schema$SearchResult[];\n}\n\nfunction saveLatestSnapshotToStorage(bucket: Bucket) {\n\n  return async function (workflowId: string, snapshot: Snapshot) {\n    const [workflowFolderExists] = await bucket.file(workflowId + '/').exists();\n    if (!workflowFolderExists) {\n      const file = bucket.file(`${workflowId}/`);\n      await file.save(\"\");\n    }\n    const snapshotData = JSON.stringify(snapshot, null, 2);\n    const file = bucket.file(`${workflowId}/youtube-trigger-snapshot.json`);\n    await file.save(snapshotData);\n  }\n}\n\nfunction getLatestSnapshotFromStorage(bucket: Bucket) {\n  return async function (workflowId: string): Promise<Snapshot | null> {\n    const file = bucket.file(`${workflowId}/youtube-trigger-snapshot.json`);\n    const [exists] = await file.exists();\n    if (exists) {\n      const [snapshot] = await file.download();\n      return JSON.parse(snapshot.toString(\"utf8\"));\n    }\n    return null;\n  }\n}\n\nasync function getChannelIdFromUrl(channelUrl: string) {\n  let url: URL;\n  try {\n    url = new URL(channelUrl);\n  } catch (cause) {\n    throw new Error(`Invalid URL: ${channelUrl}`);\n  }\n  if (url.hostname !== \"www.youtube.com\") {\n    throw new Error(`Invalid URL: ${channelUrl}`);\n  }\n\n  let [, handle, channelId] = url.pathname.split(\"/\");\n  if (handle !== \"channel\") {\n    if (handle?.slice(0, 1) !== \"@\") {\n      throw new Error(`Invalid URL: ${channelUrl}`);\n    }\n    const forHandle = handle.slice(1);\n    const { data: channelData } = await youtubeClient.channels.list({\n      part: [\"id\"],\n      forHandle,\n    });\n    channelId = channelData.items?.[0].id ?? \"\";\n  }\n\n  if (!channelId) {\n    throw new Error(`Could not find channel id for ${channelUrl}`);\n  }\n  return channelId;\n};\n\nfunction sortByDate(a: string, b: string) {\n  return new Date(a).getTime() - new Date(b).getTime();\n}\n\nasync function executeYoutubeTrigger(\n  { channelUrl }: { channelUrl: string },\n  { logging, workflow, auth }: any) {\n  try {\n\n    const storageClient = new Storage();\n    const bucket = storageClient.bucket(process.env.BUCKET as string);\n\n    // With auth integration\n    const { access_token } = await auth.getToken();\n    google.options({ auth: google.auth.fromAPIKey(access_token) });\n\n    const channelId = await getChannelIdFromUrl(channelUrl);\n    logging.log(\"Channel ID: \", channelId);\n\n    const latestSnapshot = await getLatestSnapshotFromStorage(bucket)(workflow.id);\n    logging.log(\"Latest Snapshot: \", latestSnapshot);\n\n    const searchQuery = {\n      part: [\"snippet\"],\n      channelId,\n      order: \"date\",\n    } as {\n      part: string[],\n      channelId: string,\n      order: string,\n      publishedAfter?: string,\n      maxResults?: number\n    };\n\n    const haveLatestSnapshot = !!latestSnapshot;\n    const isChannelIdMatches = latestSnapshot?.channelId === channelId;\n\n    if (haveLatestSnapshot && isChannelIdMatches) {\n      // If latest snapshot, fetch all videos after latest published date\n      logging.log(`Looking for videos published after ${latestSnapshot.latestVideoPublishedAt}`);\n      const timestamp = new Date(latestSnapshot.latestVideoPublishedAt).getTime();\n      searchQuery.publishedAfter = new Date(timestamp + 1000).toISOString();\n    } else {\n      if (!haveLatestSnapshot) {\n        logging.log(`No latest snapshot found, fetching recent 5 videos for initial snapshot`);\n      }\n      if (!isChannelIdMatches) {\n        logging.log(`Channel ID mismatch, fetching recent 5 videos for the new channel`);\n      }\n      // If no latest snapshot, fetch recent 10 videos for initial snapshot\n      searchQuery.maxResults = 5;\n    }\n\n    const { data: searchResponse } = await youtubeClient.search.list(searchQuery);\n    const newVideos = searchResponse.items || [];\n    const newVideosSorted = newVideos.sort((a, b) =>\n      sortByDate(b.snippet?.publishedAt ?? \"\", a.snippet?.publishedAt ?? \"\"));\n\n    const latestVideo = newVideosSorted[0];\n    if (haveLatestSnapshot && isChannelIdMatches) {\n      if (newVideosSorted.length > 0) {\n        logging.log(`Found ${newVideosSorted.length} new videos since last snapshot`);\n        await saveLatestSnapshotToStorage(bucket)(workflow.id, {\n          channelId,\n          latestVideoPublishedAt: latestVideo?.snippet?.publishedAt ?? \"\",\n          videos: newVideosSorted,\n        });\n      } else {\n        logging.log(\"No new videos found since last snapshot\");\n      }\n    } else {\n      if (newVideosSorted.length > 0) {\n        logging.log(`Found ${newVideosSorted.length} new videos for initial snapshot`);\n        await saveLatestSnapshotToStorage(bucket)(workflow.id, {\n          channelId,\n          latestVideoPublishedAt: latestVideo?.snippet?.publishedAt ?? \"\",\n          videos: newVideosSorted,\n        });\n      } else {\n        logging.log(\"No videos found for initial snapshot\");\n      }\n    }\n\n    return {\n      channelId,\n      channelUrl,\n      latestVideoPublishedAt: latestVideo?.snippet?.publishedAt || latestSnapshot?.latestVideoPublishedAt || \"\",\n      newVideos: newVideosSorted.map((video) => ({\n        id: video.id?.videoId ?? \"\",\n        url: `https://www.youtube.com/watch?v=${video.id?.videoId}`,\n        title: video.snippet?.title ?? \"\",\n        description: video.snippet?.description ?? \"\",\n        publishedAt: video.snippet?.publishedAt ?? \"\",\n        thumbnail: video.snippet?.thumbnails?.high?.url ?? \"\",\n      })),\n      snapshot: latestVideo ? {\n        channelId,\n        latestVideoPublishedAt: latestVideo?.snippet?.publishedAt ?? \"\",\n        videos: newVideosSorted,\n      } : isChannelIdMatches ? latestSnapshot : null,\n    }\n  } catch (cause) {\n    logging.error(cause);\n    throw cause;\n  }\n}\n/*\n** Youtube Trigger\n*/\n\n\nexport default {\n  onCreate: createTrigger,\n  onUpdate: updateTrigger,\n  onDelete: deleteTrigger,\n  onExecution: execute,\n};",
+  "type": "schedule",
+  "live": true,
+  "label": "Youtube Trigger",
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "channelUrl": {
+        "type": "string",
+        "description": "",
+        "buildship": { "index": 0, "sensitive": false },
+        "title": "Channel URL",
+        "default": "",
+        "pattern": ""
+      },
+      "timeZone": {
+        "enum": [
+          "Etc/UTC",
+          "America/New_York",
+          "America/Chicago",
+          "America/Denver",
+          "America/Los_Angeles",
+          "America/Anchorage",
+          "America/Adak",
+          "Pacific/Honolulu",
+          "Europe/London",
+          "Europe/Berlin",
+          "Europe/Moscow",
+          "Asia/Kolkata",
+          "Asia/Shanghai",
+          "Asia/Tokyo",
+          "Australia/Sydney",
+          "Australia/Adelaide",
+          "Australia/Perth",
+          "Pacific/Auckland"
+        ],
+        "description": "",
+        "default": "Etc/UTC",
+        "buildship": {
+          "options": [
+            { "value": "Etc/UTC", "label": "UTC" },
+            { "value": "America/New_York", "label": "America/New_York" },
+            { "label": "America/Chicago", "value": "America/Chicago" },
+            { "value": "America/Denver", "label": "America/Denver" },
+            { "value": "America/Los_Angeles", "label": "America/Los_Angeles" },
+            { "label": "America/Anchorage", "value": "America/Anchorage" },
+            { "value": "America/Adak", "label": "America/Adak" },
+            { "value": "Pacific/Honolulu", "label": "Pacific/Honolulu" },
+            { "value": "Europe/London", "label": "Europe/London" },
+            { "value": "Europe/Berlin", "label": "Europe/Berlin" },
+            { "label": "Europe/Moscow", "value": "Europe/Moscow" },
+            { "value": "Asia/Kolkata", "label": "Asia/Kolkata" },
+            { "label": "Asia/Shanghai", "value": "Asia/Shanghai" },
+            { "value": "Asia/Tokyo", "label": "Asia/Tokyo" },
+            { "value": "Australia/Sydney", "label": "Australia/Sydney" },
+            { "value": "Australia/Adelaide", "label": "Australia/Adelaide" },
+            { "value": "Australia/Perth", "label": "Australia/Perth" },
+            { "label": "Pacific/Auckland", "value": "Pacific/Auckland" }
+          ],
+          "sensitive": false,
+          "index": 2
+        },
+        "title": "Time Zone",
+        "pattern": "",
+        "type": "string"
+      },
+      "schedule": {
+        "description": "",
+        "title": "Track Frequency",
+        "type": "string",
+        "default": "",
+        "buildship": {
+          "sensitive": false,
+          "index": 1,
+          "options": [
+            { "value": "*/5 * * * *", "label": "Every 5 minutes" },
+            { "value": "*/15 * * * *", "label": "Every 15 minutes" },
+            { "label": "Every 30 minutes", "value": "*/30 * * * *" },
+            { "label": "Every 60 minutes", "value": "0 * * * *" },
+            { "label": "Every 6 hours", "value": "0 */6 * * *" },
+            { "value": "0 */12 * * *", "label": "Every 12 hours" },
+            { "value": "0 0 * * *", "label": "Every 24 hours" },
+            { "label": "Every 5 days", "value": "0 0 */5 * *" },
+            { "value": "0 0 */15 * *", "label": "Every 15 days" },
+            { "value": "0 0 1 * *", "label": "Every 30 days" }
+          ]
+        },
+        "pattern": "",
+        "enum": [
+          "*/5 * * * *",
+          "*/15 * * * *",
+          "*/30 * * * *",
+          "0 * * * *",
+          "0 */6 * * *",
+          "0 */12 * * *",
+          "0 0 * * *",
+          "0 0 */5 * *",
+          "0 0 */15 * *",
+          "0 0 1 * *"
+        ]
+      }
+    },
+    "required": ["locationId", "schedule", "channelUrl", "timeZone"]
+  },
+  "id": "x-youtube-trigger",
+  "dependencies": {
+    "googleapis": "135.0.0",
+    "@google-cloud/scheduler": "4.2.0",
+    "@google-cloud/storage": "7.10.2",
+    "google-auth-library": "9.9.0"
+  },
+  "paramsValues": {},
+  "output": {
+    "properties": {
+      "snapshot": {
+        "properties": {},
+        "title": "Snapshot",
+        "buildship": { "index": 4 },
+        "type": "object",
+        "description": ""
+      },
+      "channelUrl": { "type": "string", "description": "", "buildship": { "index": 1 }, "title": "Channel URL" },
+      "channelId": { "type": "string", "description": "", "buildship": { "index": 0 }, "title": "Channel Id" },
+      "newVideos": {
+        "description": "",
+        "buildship": { "index": 3 },
+        "properties": {
+          "video": {
+            "title": "Video",
+            "description": "",
+            "buildship": { "index": 0 },
+            "type": "object",
+            "properties": {
+              "thumbnail": {
+                "title": "Video Thumbnail",
+                "description": "",
+                "buildship": { "index": 4 },
+                "type": "string"
+              },
+              "id": { "buildship": { "index": 0 }, "type": "string", "title": "Video ID", "description": "" },
+              "url": { "type": "string", "description": "", "title": "Video URL", "buildship": { "index": 1 } },
+              "title": { "buildship": { "index": 2 }, "description": "", "title": "Video Title", "type": "string" },
+              "publishedAt": {
+                "type": "string",
+                "description": "",
+                "title": "Video Publish Datetime",
+                "buildship": { "index": 5 }
+              },
+              "description": {
+                "description": "",
+                "buildship": { "index": 3 },
+                "title": "Video Description",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "title": "New Videos",
+        "type": "array"
+      }
+    },
+    "title": "output",
+    "buildship": { "index": 0 },
+    "type": "object",
+    "description": ""
+  },
+  "groupId": null,
+  "testingSchema": [{ "name": "apiRequestData", "label": "Run your Youtube Trigger now", "type": "justLabel" }],
+  "name": "Youtube Trigger",
+  "params": {
+    "locationId": {
+      "label": "Location",
+      "type": "string",
+      "basePrompt": "string value of gcp location",
+      "defaultValue": "us-central1",
+      "defualtValue": "us-central1",
+      "required": true
+    },
+    "schedule": {
+      "type": "string",
+      "userPromptHint": "every 5 minutes, every tuesday & thursday 5pm ",
+      "label": "Schedule",
+      "defaultValue": "*/20 * * * *",
+      "basePrompt": "Cron formatted string with valid input Minute:0-59, Hour:\t0-23, Day of the month:1-31,Month: 1-12 (or JAN to DEC), Day of the week:0-6 (or SUN to SAT)",
+      "required": true
+    },
+    "timeZone": {
+      "type": "select",
+      "description": "Time Zone",
+      "options": [
+        { "value": "Etc/UTC", "label": "UTC" },
+        { "label": "America/New_York", "value": "America/New_York" },
+        { "value": "America/Chicago", "label": "America/Chicago" },
+        { "value": "America/Denver", "label": "America/Denver" },
+        { "value": "America/Los_Angeles", "label": "America/Los_Angeles" },
+        { "label": "America/Anchorage", "value": "America/Anchorage" },
+        { "label": "America/Adak", "value": "America/Adak" },
+        { "label": "Pacific/Honolulu", "value": "Pacific/Honolulu" },
+        { "value": "Europe/London", "label": "Europe/London" },
+        { "label": "Europe/Berlin", "value": "Europe/Berlin" },
+        { "value": "Europe/Moscow", "label": "Europe/Moscow" },
+        { "value": "Asia/Kolkata", "label": "Asia/Kolkata" },
+        { "value": "Asia/Shanghai", "label": "Asia/Shanghai" },
+        { "label": "Asia/Tokyo", "value": "Asia/Tokyo" },
+        { "label": "Australia/Sydney", "value": "Australia/Sydney" },
+        { "value": "Australia/Adelaide", "label": "Australia/Adelaide" },
+        { "value": "Australia/Perth", "label": "Australia/Perth" },
+        { "label": "Pacific/Auckland", "value": "Pacific/Auckland" }
+      ],
+      "required": true,
+      "defaultValue": "Etc/UTC",
+      "label": "Time Zone"
+    }
+  },
+  "description": ""
+}

@@ -283,14 +283,16 @@ function sortByDate(a: string, b: string) {
 }
 
 async function executeYoutubeTrigger(
-  { channelUrl, apiKey }: { channelUrl: string, apiKey: string },
-  { logging, workflow }: any) {
+  { channelUrl }: { channelUrl: string },
+  { logging, workflow, auth }: any) {
   try {
 
     const storageClient = new Storage();
     const bucket = storageClient.bucket(process.env.BUCKET as string);
-    // Without auth integration
-    google.options({ auth: google.auth.fromAPIKey(apiKey) });
+
+    // With auth integration
+    const { access_token } = await auth.getToken();
+    google.options({ auth: google.auth.fromAPIKey(access_token) });
 
     const channelId = await getChannelIdFromUrl(channelUrl);
     logging.log("Channel ID: ", channelId);
