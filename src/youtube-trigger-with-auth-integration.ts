@@ -324,7 +324,7 @@ async function executeYoutubeTrigger(
       if (!haveLatestSnapshot) {
         logging.log(`No latest snapshot found, fetching recent 5 videos for initial snapshot`);
       }
-      if (!isChannelIdMatches) {
+      if (haveLatestSnapshot && !isChannelIdMatches) {
         logging.log(`Channel ID mismatch, fetching recent 5 videos for the new channel`);
       }
       // If no latest snapshot, fetch recent 10 videos for initial snapshot
