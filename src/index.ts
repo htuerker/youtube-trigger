@@ -1,7 +1,7 @@
 
 
 import 'dotenv/config';
-import node from './node';
+import node from './youtube-trigger-as-node';
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY as string;
 const YOUTUBE_CHANNEL_ID = process.env.YOUTUBE_CHANNEL_ID as string;

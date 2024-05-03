@@ -26,9 +26,11 @@
     "typescript": "^5.4.5"
   },
   "dependencies": {
+    "@google-cloud/scheduler": "^4.2.0",
     "@google-cloud/storage": "^7.10.2",
     "@googleapis/youtube": "^15.0.0",
     "dotenv": "^16.4.5",
+    "google-auth-library": "^9.9.0",
     "googleapis": "^135.0.0",
     "json-beautify": "^1.1.1",
     "lodash": "^4.17.21"
